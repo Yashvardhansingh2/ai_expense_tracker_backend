@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 from sklearn.ensemble import IsolationForest
 from sklearn.linear_model import LinearRegression
@@ -9,13 +10,28 @@ import joblib, json
 app = Flask(__name__)
 CORS(app)
 
-# Load your ML model and vectorizer
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+model_path = os.path.join(BASE_DIR, "model.pkl")
+vectorizer_path = os.path.join(BASE_DIR, "vectorizer.pkl")
+
+# Load ML model and vectorizer
 try:
-    model = joblib.load("model.pkl")
-    vectorizer = joblib.load("vectorizer.pkl")
-except:
+    model = joblib.load(model_path)
+    vectorizer = joblib.load(vectorizer_path)
+    print("Successfully loaded model.pkl and vectorizer.pkl")
+except Exception as e:
+    print(f"Warning: Could not load ML model: {e}")
     model = None
     vectorizer = None
+
+@app.route('/', methods=['GET'])
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        'status': 'ok',
+        'service': 'ai-expense-tracker-backend',
+        'model_loaded': model is not None and vectorizer is not None
+    })
 
 # Known categories
 known_categories = [
@@ -25,39 +41,144 @@ known_categories = [
 
 # Keyword mapping
 keyword_map = {
-    "rent": "Housing & Utilities",
-    "electricity": "Housing & Utilities",
-    "wifi": "Housing & Utilities",
-    "internet": "Housing & Utilities",
-    "fuel": "Transportation",
-    "uber": "Transportation",
-    "bus": "Transportation",
-    "train": "Transportation",
-    "movie": "Entertainment",
-    "netflix": "Entertainment",
-    "spotify": "Entertainment",
-    "gym": "Health & Fitness",
-    "doctor": "Health & Fitness",
-    "amazon": "Shopping",
-    "flipkart": "Shopping",
+    # Food & Dining
     "zomato": "Food & Dining",
     "swiggy": "Food & Dining",
     "restaurant": "Food & Dining",
+    "pizza": "Food & Dining",
+    "burger": "Food & Dining",
+    "coffee": "Food & Dining",
+    "tea": "Food & Dining",
+    "chai": "Food & Dining",
+    "snack": "Food & Dining",
+    "groceries": "Food & Dining",
+    "grocery": "Food & Dining",
+    "supermarket": "Food & Dining",
+    "dinner": "Food & Dining",
+    "lunch": "Food & Dining",
+    "breakfast": "Food & Dining",
+    "cafe": "Food & Dining",
+    "food": "Food & Dining",
+    "dining": "Food & Dining",
+
+    # Transportation
+    "fuel": "Transportation",
+    "petrol": "Transportation",
+    "diesel": "Transportation",
+    "uber": "Transportation",
+    "ola": "Transportation",
+    "cab": "Transportation",
+    "taxi": "Transportation",
+    "bus": "Transportation",
+    "train": "Transportation",
+    "metro": "Transportation",
+    "auto": "Transportation",
+    "toll": "Transportation",
+    "parking": "Transportation",
+
+    # Housing & Utilities
+    "rent": "Housing & Utilities",
+    "electricity": "Housing & Utilities",
+    "water": "Housing & Utilities",
+    "gas": "Housing & Utilities",
+    "wifi": "Housing & Utilities",
+    "internet": "Housing & Utilities",
+    "broadband": "Housing & Utilities",
+    "maintenance": "Housing & Utilities",
+    "bill": "Housing & Utilities",
+
+    # Entertainment
+    "movie": "Entertainment",
+    "cinema": "Entertainment",
+    "netflix": "Entertainment",
+    "spotify": "Entertainment",
+    "prime": "Entertainment",
+    "hotstar": "Entertainment",
+    "game": "Entertainment",
+    "gaming": "Entertainment",
+    "concert": "Entertainment",
+
+    # Health & Fitness
+    "gym": "Health & Fitness",
+    "doctor": "Health & Fitness",
+    "medicine": "Health & Fitness",
+    "pharmacy": "Health & Fitness",
+    "hospital": "Health & Fitness",
+    "clinic": "Health & Fitness",
+    "dental": "Health & Fitness",
+    "dentist": "Health & Fitness",
+
+    # Shopping
+    "amazon": "Shopping",
+    "flipkart": "Shopping",
+    "myntra": "Shopping",
+    "clothes": "Shopping",
+    "clothing": "Shopping",
+    "shoes": "Shopping",
+    "mall": "Shopping",
+
+    # Education
     "book": "Education",
     "course": "Education",
+    "udemy": "Education",
+    "coursera": "Education",
+    "tuition": "Education",
+    "school": "Education",
+    "college": "Education",
+
+    # Travel
+    "flight": "Travel",
+    "airline": "Travel",
+    "hotel": "Travel",
+    "resort": "Travel",
+    "airbnb": "Travel",
+    "vacation": "Travel",
+    "trip": "Travel",
+
+    # Financial
     "loan": "Financial",
     "emi": "Financial",
     "credit": "Financial",
-    "insurance": "Financial"
+    "insurance": "Financial",
+    "investment": "Financial",
+    "sip": "Financial",
+    "mutual fund": "Financial",
+    "tax": "Financial"
 }
 
+category_aliases = {
+    "food": "Food & Dining",
+    "dining": "Food & Dining",
+    "utilities": "Housing & Utilities",
+    "housing": "Housing & Utilities",
+    "transport": "Transportation",
+    "fitness": "Health & Fitness",
+    "health": "Health & Fitness",
+    "finance": "Financial",
+}
+
+def normalize_category(cat: str) -> str:
+    if not cat:
+        return "Others"
+    cat_lower = cat.lower().strip()
+    if cat in known_categories:
+        return cat
+    if cat_lower in category_aliases:
+        return category_aliases[cat_lower]
+    for known in known_categories:
+        if cat_lower in known.lower():
+            return known
+    return cat.title()
 
 @app.route('/predict', methods=['POST'])
 def predict_category():
-    data = request.get_json()
+    data = request.get_json() or {}
     text = data.get('text', '').lower().strip()
 
-    # Step 1: Keyword match
+    if not text:
+        return jsonify({'category': 'Others'})
+
+    # Step 1: Keyword match (match whole words or substrings)
     for keyword, category in keyword_map.items():
         if keyword in text:
             return jsonify({'category': category})
@@ -67,14 +188,14 @@ def predict_category():
         try:
             vector = vectorizer.transform([text])
             prediction = model.predict(vector)[0]
-            if prediction in known_categories:
-                return jsonify({'category': prediction})
+            norm = normalize_category(prediction)
+            if norm in known_categories:
+                return jsonify({'category': norm})
         except Exception as e:
             print("Model error:", e)
 
-    # Step 3: Dynamic new category
-    category = text.title() if text else "Others"
-    return jsonify({'category': category})
+    # Step 3: Dynamic fallback category
+    return jsonify({'category': text.title() if text else "Others"})
 
 
 @app.route('/summarize', methods=['POST'])
@@ -137,4 +258,6 @@ def forecast_budget():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    port = int(os.environ.get('PORT', 5001))
+    print(f"Starting server on port {port}...")
+    app.run(host='0.0.0.0', port=port, debug=False)
